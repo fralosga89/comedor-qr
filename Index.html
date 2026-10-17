@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ingreso al comedor escolar</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 18px;
+      color: #222;
+    }
+    h1 { font-size: 25px; }
+    button {
+      width: 100%;
+      padding: 14px;
+      margin: 7px 0;
+      font-size: 17px;
+      border: 0;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .principal { background: #176b43; color: white; }
+    .secundario { background: #e8e8e8; color: #222; }
+    #lector { margin-top: 15px; }
+    #resultado {
+      margin-top: 15px;
+      padding: 15px;
+      border-radius: 8px;
+      background: #eee;
+      overflow-wrap: anywhere;
+    }
+    .ok { background: #d9ead3 !important; }
+    .error { background: #f4cccc !important; }
+  </style>
+</head>
+<body>
+  <h1>Control de ingreso al comedor</h1>
+  <p>Escanea la tarjeta QR del estudiante para registrar su ingreso.</p>
+
+  <button class="principal" onclick="iniciar()">Activar cámara</button>
+  <button class="secundario" onclick="detener()">Detener cámara</button>
+
+  <div id="lector"></div>
+  <div id="resultado">Esperando el escaneo de una tarjeta.</div>
+
+  <script>
+    // CAMBIA ESTA DIRECCIÓN POR TU URL REAL DE APPS SCRIPT.
+    const API_URL = "https://script.google.com/macros/s/AKfycbwiBI-l_gwUKSu1QsnPuaJFUEIw-DMkELobzsPHLFHFC8HF7O72jbAZrUdJkqVMx5xEqg/exec";
+
+    let scanner = null;
+    let ocupado = false;
+    let ultimoCodigo = "";
+    let ultimoTiempo = 0;
+
+    function mostrar(texto, clase = "") {
+      const elemento = document.getElementById("resultado");
+      elemento.textContent = texto;
+      elemento.className = clase;
+    }
+
+    function enviarCodigo(codigo) {
+      if (ocupado) return;
+
+      ocupado = true;
+      mostrar("Verificando el código...");
+
+      const nombreCallback =
+        "respuestaQR_" + Date.now() + "_" +
+        Math.random().toString(36).slice(2, 8);
+
+      const script = document.createElement("script");
+      let terminado = false;
+
+      const finalizar = () => {
+        if (terminado) return;
+        terminado = true;
+        clearTimeout (temporizador);
+        delete window[nombreCallback];
+        script.remove();
+        ocupado = false;
+      };
+
+      window[nombreCallback] = function(respuesta) {
+        finalizar();
+
+        if (respuesta.ok) {
+          mostrar(
+            "ASISTENCIA REGISTRADA\n" +
+            respuesta.nombres + "\nCurso: " +
+            respuesta.curso + "\nHora: " + respuesta.hora,
+            "ok"
+          );
+        } else {
+          mostrar(respuesta.mensaje || "No fue posible registrar.", "error");
+        }
+      };
+
+      const temporizador = setTimeout(() => {
+        finalizar();
+        mostrar("No hubo respuesta del servidor. Verifica la conexión.", "error");
+      }, 15000);
+
+      script.onerror = () => {
+        finalizar();
+        mostrar("Error de conexión con el sistema de asistencia.", "error");
+      };
+
+      script.src = API_URL +
+        "?action=scan&code=" + encodeURIComponent(codigo) +
+        "&callback=" + encodeURIComponent(nombreCallback) +
+        "&t=" + Date.now();
+
+      document.body.appendChild(script);
+    }
+
+    async function iniciar() {
+      if (!API_URL.startsWith("https://script.google.com/") ||
+          API_URL.includes("PEGA_AQUI")) {
+        mostrar("Configura primero la URL real de Apps Script.", "error");
+        return;
+      }
+
+      if (!window.Html5Qrcode) {
+        mostrar("No se pudo cargar el lector QR. Revisa internet.", "error");
+        return;
+      }
+
+      if (scanner) return;
+
+      scanner = new Html5Qrcode("lector");
+
+      try {
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 240, height: 240 } },
+          codigo => {
+            const ahora = Date.now();
+
+            if (codigo === ultimoCodigo && ahora - ultimoTiempo < 3000) {
+              return;
+            }
+
+            if (ocupado) return;
+
+            ultimoCodigo = codigo;
+            ultimoTiempo = ahora;
+            enviarCodigo(codigo);
+          }
+        );
+      } catch (error) {
+        scanner = null;
+        mostrar(
+          "No se pudo activar la cámara. Revisa los permisos del navegador.",
+          "error"
+        );
+      }
+    }
+
+    async function detener() {
+      if (!scanner) return;
+
+      const actual = scanner;
+      scanner = null;
+
+      try {
+        await actual.stop();
+        actual.clear();
+      } catch (error) {
+        mostrar("La cámara ya está detenida o no pudo cerrarse.", "error");
+      }
+    }
+  </script>
+</body>
+</html>
